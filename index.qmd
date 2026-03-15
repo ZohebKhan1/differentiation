@@ -25,12 +25,33 @@ course data.
 
 ![](assets/overview.svg){width="100%"}
 
-**Dataset.** Publicly available data from
-[Martinez et al. (2024)](https://doi.org/10.1016/j.stemcr.2024.04.010):
-D21 (euploid control) and T21 (trisomy 21) iPSC-derived
-neural progenitors sampled at Days 6, 10, and 17 of
-differentiation. 18 samples total (3 replicates per
-genotype per timepoint).
+**Dataset.** Data from
+[Martinez et al. (2024)](https://doi.org/10.3389/fncel.2024.1341141):
+D21 (euploid control) and T21 (trisomy 21)
+iPSC-derived neural progenitors at Days 6, 10,
+and 17 (18 samples, 3 replicates per condition).
+
+## Motivation
+
+Standard differential expression analysis compares
+conditions at individual timepoints independently.
+This discards the temporal structure of
+differentiation. A sample that is transcriptionally
+"ahead" or "behind" in differentiation will appear
+differentially expressed at every timepoint, but the
+underlying cause is a timing shift, not a
+condition-specific program.
+
+This method reduces the full transcriptomic trajectory
+to a single scalar **maturation score** per sample.
+This enables:
+
+- Direct quantification of differentiation timing
+  differences between conditions
+- Detection of whether an experimental condition
+  accelerates or delays differentiation
+- Comparison across experiments that share a common
+  reference time course
 
 ## Workflow
 
@@ -42,11 +63,11 @@ fig-align="center"}
 ### PCA
 
 Given a centered expression matrix $\mathbf{X}_c$
-(genes $\times$ samples), PCA computes the singular
-value decomposition:
+(genes $\times$ samples):
 
 $$
-\mathbf{X}_c = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^\top
+\mathbf{X}_c
+= \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^\top
 $$
 
 Each sample's coordinates in PC space:
@@ -57,10 +78,10 @@ $$
   \!\left(\mathbf{x}_i - \bar{\mathbf{x}}\right)
 $$
 
-### Centroid Vector Projection
+### Centroid Vector
 
-The reference vector connects control centroids at the
-earliest and latest timepoints:
+The reference vector connects control centroids at
+the earliest and latest timepoints:
 
 $$
 \vec{v}
@@ -73,10 +94,6 @@ $$
 
 ### Maturation Score
 
-Each sample is projected onto the reference vector and
-normalized so the early centroid maps to 0 and the late
-centroid maps to 1:
-
 $$
 s_i
 = \frac{
@@ -87,6 +104,9 @@ s_i
     \lVert\vec{v}\rVert^2
   }
 $$
+
+By construction, $s \approx 0$ at the early control
+centroid and $s \approx 1$ at the late control centroid.
 
 ---
 
@@ -104,6 +124,7 @@ library(tibble)
 library(plotly)
 library(ComplexHeatmap)
 library(circlize)
+library(viridis)
 
 meta <- readRDS("dat/metadata/WC24_metadata_clean.rds")
 raw_counts <- readRDS(
@@ -120,10 +141,12 @@ meta$timepoint <- factor(
 cat(
   "Samples:", nrow(meta), "\n",
   "Genes:", nrow(raw_counts), "\n",
-  "Genotypes:", paste(levels(factor(meta$genotype)),
-                      collapse = ", "), "\n",
-  "Timepoints:", paste(levels(meta$timepoint),
-                       collapse = ", ")
+  "Genotypes:", paste(
+    levels(factor(meta$genotype)), collapse = ", "
+  ), "\n",
+  "Timepoints:", paste(
+    levels(meta$timepoint), collapse = ", "
+  )
 )
 ```
 
@@ -136,11 +159,9 @@ timepoint, reduced model is intercept-only.
 #| label: lrt
 #| cache: true
 
-# Subset to D21 controls
 ctrl_meta <- meta[meta$genotype == "D21", ]
 ctrl_counts <- raw_counts[, ctrl_meta$sample_id]
 
-# DESeq2 LRT
 dds <- DESeqDataSetFromMatrix(
   countData = ctrl_counts,
   colData   = ctrl_meta,
@@ -150,40 +171,33 @@ dds <- DESeq(dds, test = "LRT", reduced = ~ 1)
 res <- results(dds)
 res <- res[order(res$padj), ]
 
-# Significant genes
 sig_genes <- rownames(res)[
   !is.na(res$padj) & res$padj < 0.05
 ]
+n_top <- min(1000, length(sig_genes))
+top_genes <- head(rownames(res), n_top)
 
 cat(
   "Significant genes (padj < 0.05):",
   length(sig_genes), "\n",
-  "Top 10:", paste(head(sig_genes, 10), collapse = ", ")
+  "Genes used for PCA:", n_top
 )
 ```
 
-```{r}
-#| label: top-genes
-n_top <- min(1000, length(sig_genes))
-top_genes <- head(rownames(res), n_top)
-cat("Genes used for PCA:", n_top)
-```
+### Temporally Variable Gene Heatmap
 
-### Temporal Gene Heatmap
-
-Z-scored VST expression of all temporally variable
-genes (padj < 0.05) in D21 samples. Values winsorized
-at $\pm 2$.
+Z-scored VST expression of all LRT-significant genes
+in D21 samples. Rows split into $k = 3$ clusters.
 
 ```{r}
 #| label: fig-heatmap
 #| fig-cap: >
-#|   Heatmap of temporally variable genes in D21
-#|   control samples
-#| fig-height: 10
-#| fig-width: 5
+#|   Z-scored expression of temporally variable genes
+#|   across D21 control timepoints (k=3 row clusters,
+#|   viridis palette, winsorized at +/- 2)
+#| fig-height: 6
+#| fig-width: 4
 
-# Z-score and winsorize
 hm_mat <- as.matrix(
   vst_counts[sig_genes, ctrl_meta$sample_id]
 )
@@ -191,46 +205,31 @@ hm_z <- t(scale(t(hm_mat)))
 hm_z[hm_z >  2] <-  2
 hm_z[hm_z < -2] <- -2
 
-# Column annotation
-col_anno <- HeatmapAnnotation(
-  Day = factor(
-    ctrl_meta[colnames(hm_z), "timepoint"],
-    levels = c(6, 10, 17)
-  ),
-  col = list(Day = c(
-    "6"  = "#93C5FD",
-    "10" = "#3B82F6",
-    "17" = "#1E3A8A"
-  )),
-  annotation_name_side = "left",
-  show_legend = TRUE
-)
-
 col_fun <- colorRamp2(
-  c(-2, 0, 2), c("#2166AC", "#F7F7F7", "#B2182B")
+  seq(-2, 2, length.out = 100),
+  viridis(100)
 )
 
 ht <- Heatmap(
   hm_z,
-  name              = "Z-score",
-  col               = col_fun,
-  top_annotation    = col_anno,
-  cluster_columns   = FALSE,
-  cluster_rows      = TRUE,
+  name                   = "Z-score",
+  col                    = col_fun,
+  cluster_columns        = FALSE,
+  cluster_rows           = TRUE,
   clustering_method_rows = "ward.D2",
-  show_row_names    = FALSE,
-  show_column_names = TRUE,
-  column_split      = factor(
+  row_km                 = 3,
+  row_gap                = unit(2, "mm"),
+  show_row_names         = FALSE,
+  show_column_names      = FALSE,
+  column_split           = factor(
     ctrl_meta[colnames(hm_z), "timepoint"],
     levels = c(6, 10, 17)
   ),
-  column_title      = c("Day 6", "Day 10", "Day 17"),
-  column_gap        = unit(3, "mm"),
-  row_title         = paste0(
-    length(sig_genes), " genes"
-  ),
-  border            = TRUE,
-  use_raster        = TRUE
+  column_title    = c("Day 6", "Day 10", "Day 17"),
+  column_gap      = unit(3, "mm"),
+  row_title       = paste0(length(sig_genes), " genes"),
+  border          = FALSE,
+  use_raster      = TRUE
 )
 
 draw(ht)
@@ -241,13 +240,12 @@ draw(ht)
 ```{r}
 #| label: fig-lineplot
 #| fig-cap: >
-#|   Example genes showing three temporal patterns:
-#|   declining from Day 6, peaking at Day 10,
-#|   and monotonically increasing
+#|   Three representative LRT genes illustrating
+#|   distinct temporal behaviors: monotonic decline,
+#|   transient peak, and monotonic increase
 #| fig-height: 3.5
 #| fig-width: 9
 
-# Mean VST per timepoint for each sig gene
 ctrl_vst <- vst_counts[sig_genes, ctrl_meta$sample_id]
 tp_num <- as.numeric(
   as.character(ctrl_meta$timepoint)
@@ -257,7 +255,6 @@ mean_d6  <- rowMeans(ctrl_vst[, tp_num == 6])
 mean_d10 <- rowMeans(ctrl_vst[, tp_num == 10])
 mean_d17 <- rowMeans(ctrl_vst[, tp_num == 17])
 
-# Classify temporal patterns
 peak_early <- names(which(
   mean_d6 > mean_d10 & mean_d10 > mean_d17
 ))
@@ -268,7 +265,6 @@ peak_mid <- names(which(
   mean_d10 > mean_d6 & mean_d10 > mean_d17
 ))
 
-# Dynamic range for picking representative genes
 dyn_range <- apply(
   cbind(mean_d6, mean_d10, mean_d17), 1,
   function(x) max(x) - min(x)
@@ -291,7 +287,6 @@ pattern_names <- c(
   "Monotonic Increase"
 )
 
-# Build plot data
 plot_df <- do.call(rbind, lapply(
   seq_along(example_genes), function(i) {
     g <- example_genes[i]
@@ -309,11 +304,9 @@ plot_df$label <- paste0(
   plot_df$pattern, "\n(", plot_df$gene, ")"
 )
 plot_df$label <- factor(
-  plot_df$label,
-  levels = unique(plot_df$label)
+  plot_df$label, levels = unique(plot_df$label)
 )
 
-# Compute means
 plot_means <- plot_df %>%
   group_by(label, timepoint) %>%
   summarize(
@@ -326,12 +319,14 @@ ggplot() +
   geom_point(
     data = plot_df,
     aes(x = timepoint, y = expr),
-    color = "#000000", size = 2, alpha = 0.6
+    color = "#000000", size = 1.5, alpha = 1
   ) +
   geom_errorbar(
     data = plot_means,
-    aes(x = timepoint, ymin = m - se, ymax = m + se),
-    width = 0.8, color = "#1E40AF", linewidth = 0.6
+    aes(x = timepoint, ymin = m - se,
+        ymax = m + se),
+    width = 0.8, color = "#1E40AF",
+    linewidth = 0.6
   ) +
   geom_line(
     data = plot_means,
@@ -341,9 +336,10 @@ ggplot() +
   geom_point(
     data = plot_means,
     aes(x = timepoint, y = m),
-    color = "#1E40AF", size = 3
+    color = "#1E40AF", size = 2.25
   ) +
-  facet_wrap(~ label, nrow = 1, scales = "free_y") +
+  facet_wrap(~ label, nrow = 1,
+             scales = "free_y") +
   scale_x_continuous(
     breaks = c(6, 10, 17),
     labels = c("Day 6", "Day 10", "Day 17")
@@ -358,22 +354,20 @@ ggplot() +
   )
 ```
 
-### PCA: Samples in PC Space
+### D21 Control PC Space
+
+PCA on D21 controls using top 1000 LRT genes defines
+the reference coordinate system.
 
 ```{r}
-#| label: fig-pca-3d
-#| fig-cap: >
-#|   Interactive 3D PCA of all samples projected
-#|   into the D21 control-defined PC space
+#| label: pca-compute
 
-# PCA on D21 controls
 pca_input <- t(as.matrix(
   vst_counts[top_genes, ctrl_meta$sample_id]
 ))
 pca_res <- prcomp(pca_input, scale. = TRUE,
                   center = TRUE)
 
-# Variance explained
 var_pct <- round(
   summary(pca_res)$importance[2, 1:3] * 100, 1
 )
@@ -384,7 +378,6 @@ all_input <- t(as.matrix(
 ))
 all_proj <- predict(pca_res, all_input)
 
-# Build data frame
 pca_df <- data.frame(
   PC1       = all_proj[, 1],
   PC2       = all_proj[, 2],
@@ -394,109 +387,197 @@ pca_df <- data.frame(
   timepoint = paste0("Day ", meta$timepoint)
 )
 
-# Color + symbol maps
-geno_colors <- c("D21" = "#3B82F6", "T21" = "#EF4444")
-tp_symbols  <- c(
-  "Day 6" = "circle", "Day 10" = "square",
-  "Day 17" = "diamond"
+# Centroids
+tp_num_all <- as.numeric(
+  as.character(meta$timepoint)
+)
+ctrl_d6  <- meta$genotype == "D21" & tp_num_all == 6
+ctrl_d10 <- meta$genotype == "D21" & tp_num_all == 10
+ctrl_d17 <- meta$genotype == "D21" & tp_num_all == 17
+
+centroid_d6  <- colMeans(all_proj[ctrl_d6,  1:3])
+centroid_d10 <- colMeans(all_proj[ctrl_d10, 1:3])
+centroid_d17 <- colMeans(all_proj[ctrl_d17, 1:3])
+```
+
+```{r}
+#| label: fig-d21-pca
+#| fig-cap: >
+#|   D21 control samples in PC space defined by top
+#|   1000 LRT genes, colored by timepoint
+
+ctrl_pca <- pca_df[pca_df$genotype == "D21", ]
+
+tp_colors <- c(
+  "Day 6"  = "#2563EB",
+  "Day 10" = "#059669",
+  "Day 17" = "#DC2626"
+)
+
+scene_axes <- list(
+  xaxis = list(title = paste0(
+    "PC1 (", var_pct[1], "%)"
+  )),
+  yaxis = list(title = paste0(
+    "PC2 (", var_pct[2], "%)"
+  )),
+  zaxis = list(title = paste0(
+    "PC3 (", var_pct[3], "%)"
+  ))
+)
+
+plot_ly(
+  ctrl_pca,
+  x = ~PC1, y = ~PC2, z = ~PC3,
+  color  = ~timepoint,
+  colors = tp_colors,
+  type   = "scatter3d",
+  mode   = "markers",
+  marker = list(size = 4.5, opacity = 1),
+  text   = ~paste(sample, timepoint),
+  hoverinfo = "text"
+) %>%
+  layout(scene = scene_axes)
+```
+
+### Choosing the Reference Vector
+
+Three possible vectors connect pairs of D21 control
+centroids. Each captures a different segment of the
+differentiation trajectory.
+
+```{r}
+#| label: fig-vector-options
+#| fig-cap: >
+#|   Three candidate reference vectors on D21
+#|   controls: Day 6 to Day 10 (early),
+#|   Day 10 to Day 17 (late),
+#|   Day 6 to Day 17 (full trajectory, used here)
+
+plot_ly() %>%
+  # D21 samples
+  add_trace(
+    data = ctrl_pca,
+    x = ~PC1, y = ~PC2, z = ~PC3,
+    color  = ~timepoint,
+    colors = tp_colors,
+    type   = "scatter3d", mode = "markers",
+    marker = list(size = 4.5, opacity = 1),
+    text   = ~paste(sample, timepoint),
+    hoverinfo = "text"
+  ) %>%
+  # Centroids
+  add_trace(
+    x = c(centroid_d6[1], centroid_d10[1],
+          centroid_d17[1]),
+    y = c(centroid_d6[2], centroid_d10[2],
+          centroid_d17[2]),
+    z = c(centroid_d6[3], centroid_d10[3],
+          centroid_d17[3]),
+    type   = "scatter3d", mode = "markers",
+    marker = list(
+      size = 8, color = "#000",
+      symbol = "diamond", opacity = 1
+    ),
+    name = "Centroids",
+    text = c("Day 6", "Day 10", "Day 17"),
+    hoverinfo = "text"
+  ) %>%
+  # Vector 1: D6 -> D10 (early)
+  add_trace(
+    x = c(centroid_d6[1], centroid_d10[1]),
+    y = c(centroid_d6[2], centroid_d10[2]),
+    z = c(centroid_d6[3], centroid_d10[3]),
+    type = "scatter3d", mode = "lines",
+    line = list(
+      width = 6, color = "#6366F1",
+      dash = "dot"
+    ),
+    name = "D6 -> D10 (early)"
+  ) %>%
+  # Vector 2: D10 -> D17 (late)
+  add_trace(
+    x = c(centroid_d10[1], centroid_d17[1]),
+    y = c(centroid_d10[2], centroid_d17[2]),
+    z = c(centroid_d10[3], centroid_d17[3]),
+    type = "scatter3d", mode = "lines",
+    line = list(
+      width = 6, color = "#F59E0B",
+      dash = "dot"
+    ),
+    name = "D10 -> D17 (late)"
+  ) %>%
+  # Vector 3: D6 -> D17 (full, selected)
+  add_trace(
+    x = c(centroid_d6[1], centroid_d17[1]),
+    y = c(centroid_d6[2], centroid_d17[2]),
+    z = c(centroid_d6[3], centroid_d17[3]),
+    type = "scatter3d", mode = "lines",
+    line = list(width = 8, color = "#059669"),
+    name = "D6 -> D17 (full)"
+  ) %>%
+  layout(scene = scene_axes)
+```
+
+The **full trajectory** vector (Day 6 to Day 17) is
+used here because it captures the complete
+differentiation arc.
+
+### All Samples in Reference PC Space
+
+All 18 samples projected into the D21-defined PC space.
+Color indicates timepoint; shape indicates genotype.
+
+```{r}
+#| label: fig-all-pca
+#| fig-cap: >
+#|   All D21 and T21 samples projected into the D21
+#|   control-defined PC space. Color = timepoint,
+#|   shape = genotype.
+
+geno_symbols <- c(
+  "D21" = "circle", "T21" = "diamond"
 )
 
 plot_ly(
   pca_df,
-  x      = ~PC1, y = ~PC2, z = ~PC3,
-  color  = ~genotype,
-  symbol = ~timepoint,
-  colors = geno_colors,
-  symbols = tp_symbols,
+  x = ~PC1, y = ~PC2, z = ~PC3,
+  color  = ~timepoint,
+  symbol = ~genotype,
+  colors = tp_colors,
+  symbols = geno_symbols,
   type   = "scatter3d",
   mode   = "markers",
-  marker = list(size = 6, opacity = 0.85),
-  text   = ~paste(
-    sample, "<br>",
-    genotype, timepoint
-  ),
+  marker = list(size = 4.5, opacity = 1),
+  text   = ~paste(sample, genotype, timepoint),
   hoverinfo = "text"
 ) %>%
-  layout(scene = list(
-    xaxis = list(title = paste0(
-      "PC1 (", var_pct[1], "%)"
-    )),
-    yaxis = list(title = paste0(
-      "PC2 (", var_pct[2], "%)"
-    )),
-    zaxis = list(title = paste0(
-      "PC3 (", var_pct[3], "%)"
-    ))
-  ))
+  layout(scene = scene_axes)
 ```
 
-### Reference Vector and Centroid Projection
-
-$$
-\bar{\mathbf{z}}_{\text{Day}\,6}
-= \frac{1}{3}\sum_{i=1}^{3}\mathbf{z}_i^{(\text{D21, D6})}
-\qquad
-\vec{v}
-= \bar{\mathbf{z}}_{\text{Day}\,17}
-  - \bar{\mathbf{z}}_{\text{Day}\,6}
-$$
+### Reference Trajectory with Centroid Vector
 
 ```{r}
-#| label: fig-centroid-3d
+#| label: fig-ref-trajectory
 #| fig-cap: >
-#|   3D PCA with reference vector connecting
-#|   D21 Day 6 and Day 17 centroids
+#|   Reference trajectory defined by D21 Day 6 to
+#|   Day 17 centroid vector (green). All samples shown
+#|   with genotype shapes. Centroids marked as black
+#|   diamonds.
 
-# Centroids
-tp_num_all <- as.numeric(as.character(meta$timepoint))
-d6_idx  <- meta$genotype == "D21" & tp_num_all == 6
-d17_idx <- meta$genotype == "D21" & tp_num_all == 17
-
-centroid_d6  <- colMeans(all_proj[d6_idx,  1:3])
-centroid_d17 <- colMeans(all_proj[d17_idx, 1:3])
 ref_vec <- centroid_d17 - centroid_d6
 
-cat(
-  "Day 6 centroid: ",
-  paste(round(centroid_d6, 2), collapse = ", "), "\n",
-  "Day 17 centroid:",
-  paste(round(centroid_d17, 2), collapse = ", "), "\n",
-  "Vector magnitude:",
-  round(sqrt(sum(ref_vec^2)), 2)
-)
-```
-
-```{r}
-#| label: fig-centroid-3d-plot
-#| fig-cap: >
-#|   Reference vector (green) from Day 6 to Day 17
-#|   centroid. Experimental samples are projected
-#|   onto this vector to compute maturation scores.
-
-# Sample points
-p <- plot_ly() %>%
-  # D21 samples
+plot_ly() %>%
   add_trace(
-    data   = pca_df[pca_df$genotype == "D21", ],
+    data = pca_df,
     x = ~PC1, y = ~PC2, z = ~PC3,
+    color  = ~timepoint,
+    symbol = ~genotype,
+    colors = tp_colors,
+    symbols = geno_symbols,
     type   = "scatter3d", mode = "markers",
-    marker = list(
-      size = 5, color = "#3B82F6", opacity = 0.7
-    ),
-    name = "D21",
-    text = ~paste(sample, timepoint),
-    hoverinfo = "text"
-  ) %>%
-  # T21 samples
-  add_trace(
-    data   = pca_df[pca_df$genotype == "T21", ],
-    x = ~PC1, y = ~PC2, z = ~PC3,
-    type   = "scatter3d", mode = "markers",
-    marker = list(
-      size = 5, color = "#EF4444", opacity = 0.7
-    ),
-    name = "T21",
-    text = ~paste(sample, timepoint),
+    marker = list(size = 4.5, opacity = 1),
+    text   = ~paste(sample, genotype, timepoint),
     hoverinfo = "text"
   ) %>%
   # Centroids
@@ -506,14 +587,14 @@ p <- plot_ly() %>%
     z = c(centroid_d6[3], centroid_d17[3]),
     type   = "scatter3d", mode = "markers",
     marker = list(
-      size = 10, color = "#059669",
+      size = 8, color = "#000",
       symbol = "diamond", opacity = 1
     ),
-    name = "Centroids",
+    name = "D21 Centroids",
     text = c("Day 6 Centroid", "Day 17 Centroid"),
     hoverinfo = "text"
   ) %>%
-  # Reference vector line
+  # Reference vector
   add_trace(
     x = c(centroid_d6[1], centroid_d17[1]),
     y = c(centroid_d6[2], centroid_d17[2]),
@@ -521,9 +602,9 @@ p <- plot_ly() %>%
     type = "scatter3d", mode = "lines",
     line = list(width = 8, color = "#059669"),
     name = "Reference Vector",
-    showlegend = FALSE
+    showlegend = TRUE
   ) %>%
-  # Arrow tip (cone)
+  # Arrow tip
   add_trace(
     type = "cone",
     x = centroid_d17[1],
@@ -539,27 +620,15 @@ p <- plot_ly() %>%
     colorscale = list(
       c(0, "#059669"), c(1, "#059669")
     ),
-    name = "",
-    showlegend = FALSE
+    name = "", showlegend = FALSE
   ) %>%
-  layout(scene = list(
-    xaxis = list(title = paste0(
-      "PC1 (", var_pct[1], "%)"
-    )),
-    yaxis = list(title = paste0(
-      "PC2 (", var_pct[2], "%)"
-    )),
-    zaxis = list(title = paste0(
-      "PC3 (", var_pct[3], "%)"
-    ))
-  ))
-
-p
+  layout(scene = scene_axes)
 ```
 
-### Maturation Scores
+### Sample Projections onto Trajectory
 
-Each sample is projected onto $\vec{v}$ and normalized:
+Each sample is projected onto $\vec{v}$ and
+normalized:
 
 $$
 s_i
@@ -572,29 +641,84 @@ s_i
   }
 $$
 
-where $s \approx 0$ at Day 6 and $s \approx 1$ at
-Day 17 for D21 controls by construction.
-
 ```{r}
-#| label: scores
+#| label: scores-compute
 
-# Compute scores
 scores <- apply(all_proj[, 1:3], 1, function(z) {
   sum((z - centroid_d6) * ref_vec) / sum(ref_vec^2)
 })
 
 score_df <- data.frame(
-  sample     = meta$sample_id,
-  genotype   = meta$genotype,
-  timepoint  = paste0("Day ", meta$timepoint),
-  score      = scores
+  sample    = meta$sample_id,
+  genotype  = meta$genotype,
+  timepoint = paste0("Day ", meta$timepoint),
+  score     = scores
 )
 score_df$timepoint <- factor(
   score_df$timepoint,
   levels = c("Day 6", "Day 10", "Day 17")
 )
+```
 
-# Summary table
+```{r}
+#| label: fig-projection-strip
+#| fig-cap: >
+#|   Sample positions along the D21 reference
+#|   trajectory. Each point is one sample projected
+#|   onto the centroid vector. Score 0 = Day 6
+#|   centroid, score 1 = Day 17 centroid.
+#| fig-height: 3.5
+#| fig-width: 7
+
+ggplot(
+  score_df,
+  aes(x = score, y = genotype,
+      color = genotype, shape = genotype)
+) +
+  geom_vline(
+    xintercept = c(0, 1),
+    linetype = "dashed", color = "#000",
+    alpha = 0.3
+  ) +
+  geom_point(size = 2.25, alpha = 1) +
+  facet_wrap(~ timepoint, ncol = 1) +
+  scale_color_manual(values = c(
+    "D21" = "#3B82F6", "T21" = "#EF4444"
+  )) +
+  scale_shape_manual(values = c(
+    "D21" = 16, "T21" = 18
+  )) +
+  annotate(
+    "text", x = 0, y = 0.4,
+    label = "Day 6\ncentroid", size = 2.5,
+    hjust = 0.5, color = "#000"
+  ) +
+  annotate(
+    "text", x = 1, y = 0.4,
+    label = "Day 17\ncentroid", size = 2.5,
+    hjust = 0.5, color = "#000"
+  ) +
+  labs(
+    x = "Maturation Score",
+    y = NULL, color = "Genotype",
+    shape = "Genotype"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    strip.text = element_text(
+      size = 10, face = "bold"
+    ),
+    legend.position = "top"
+  )
+```
+
+### Maturation Score Comparison
+
+```{r}
+#| label: score-table
+
 score_summary <- score_df %>%
   group_by(genotype, timepoint) %>%
   summarize(
@@ -615,9 +739,9 @@ knitr::kable(
 ```{r}
 #| label: fig-scores
 #| fig-cap: >
-#|   Maturation scores by genotype and timepoint.
-#|   Scores near 0 = Day 6 control level;
-#|   scores near 1 = Day 17 control level.
+#|   Maturation score by genotype and timepoint.
+#|   Dashed lines at 0 (Day 6 control centroid)
+#|   and 1 (Day 17 control centroid).
 #| fig-height: 5
 #| fig-width: 6
 
@@ -626,34 +750,34 @@ ggplot(
   aes(x = timepoint, y = score, fill = genotype)
 ) +
   geom_boxplot(
-    width = 0.5, outlier.shape = NA,
-    alpha = 0.6
+    width = 0.5, outlier.shape = NA, alpha = 1
   ) +
   geom_point(
     position = position_jitterdodge(
       jitter.width = 0.05, dodge.width = 0.5
     ),
-    size = 2.5, alpha = 0.8,
+    size = 1.9, alpha = 1,
     aes(color = genotype)
   ) +
   scale_fill_manual(values = c(
-    "D21" = "#3B82F6", "T21" = "#EF4444"
+    "D21" = "#93C5FD", "T21" = "#FCA5A5"
   )) +
   scale_color_manual(values = c(
     "D21" = "#2563EB", "T21" = "#DC2626"
   )) +
   geom_hline(
     yintercept = c(0, 1),
-    linetype = "dashed", color = "#000000"
+    linetype = "dashed", color = "#000",
+    alpha = 0.3
   ) +
   annotate(
     "text", x = 0.55, y = 0.03,
-    label = "Day 6 ref", color = "#000000",
+    label = "Day 6 ref", color = "#000",
     size = 3, hjust = 0
   ) +
   annotate(
     "text", x = 0.55, y = 1.03,
-    label = "Day 17 ref", color = "#000000",
+    label = "Day 17 ref", color = "#000",
     size = 3, hjust = 0
   ) +
   labs(
@@ -667,68 +791,11 @@ ggplot(
   )
 ```
 
-```{r}
-#| label: fig-trajectory
-#| fig-cap: >
-#|   Differentiation trajectories for D21 and T21
-#| fig-height: 4
-#| fig-width: 5
-
-# Mean trajectory
-traj_df <- score_df %>%
-  group_by(genotype, timepoint) %>%
-  summarize(
-    mean_score = mean(score),
-    se = sd(score) / sqrt(n()),
-    .groups = "drop"
-  )
-
-ggplot(traj_df, aes(
-  x = timepoint, y = mean_score,
-  color = genotype, group = genotype
-)) +
-  geom_ribbon(
-    aes(
-      ymin = mean_score - se,
-      ymax = mean_score + se,
-      fill = genotype
-    ),
-    alpha = 0.15, color = NA
-  ) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 3) +
-  geom_point(
-    data = score_df,
-    aes(x = timepoint, y = score),
-    alpha = 0.4, size = 1.5
-  ) +
-  scale_color_manual(values = c(
-    "D21" = "#3B82F6", "T21" = "#EF4444"
-  )) +
-  scale_fill_manual(values = c(
-    "D21" = "#3B82F6", "T21" = "#EF4444"
-  )) +
-  geom_hline(
-    yintercept = c(0, 1),
-    linetype = "dashed", color = "#000000", alpha = 0.3
-  ) +
-  labs(
-    x = NULL, y = "Maturation Score",
-    color = "Genotype", fill = "Genotype"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid.minor = element_blank(),
-    legend.position = "top"
-  )
-```
-
 ### Genotype Comparison
 
 ```{r}
 #| label: comparison
 
-# Compute differences
 d21_means <- score_summary %>%
   filter(genotype == "D21") %>%
   select(timepoint, d21 = mean_score)
@@ -752,14 +819,11 @@ knitr::kable(
     "Timepoint", "D21 Score", "T21 Score",
     "Difference", "% Difference"
   ),
-  caption = paste(
-    "Maturation score differences",
-    "(T21 - D21)"
-  )
+  caption = "Maturation score differences (T21 - D21)"
 )
 ```
 
 ---
 
-*Data: Martinez et al. (2024). Front Cell Neurosci
-18: 1341141.*
+*Data: Martinez et al. (2024).
+Front Cell Neurosci 18: 1341141.*
