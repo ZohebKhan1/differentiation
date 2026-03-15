@@ -3,7 +3,7 @@ project:
   output-dir: docs
 
 website:
-  title: "Differentiation"
+  title: "Bulk-differentiation-scoring"
   page-navigation: false
   back-to-top-navigation: true
 

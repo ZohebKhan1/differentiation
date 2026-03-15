@@ -1,10 +1,10 @@
-# Differentiation
+# Bulk-differentiation-scoring
 
 PCA-based method for quantifying differentiation
 timing differences between conditions in bulk RNA-seq
 time course data.
 
-**[View the full interactive analysis](https://zohebkhan1.github.io/differentiation/)**
+**[View the full interactive analysis](https://zohebkhan1.github.io/Bulk-differentiation-scoring/)**
 
 ## Method
 
