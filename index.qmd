@@ -23,34 +23,11 @@ PCA-based method for comparing differentiation
 progression between conditions in bulk RNA-seq time
 course data.
 
-![](assets/overview.svg){width="100%"}
-
 **Dataset.** Data from
 [Martinez et al. (2024)](https://doi.org/10.3389/fncel.2024.1341141):
 D21 (euploid control) and T21 (trisomy 21)
 iPSC-derived neural progenitors at Days 6, 10,
 and 17 (18 samples, 3 replicates per condition).
-
-## Motivation
-
-Standard differential expression compares conditions
-at individual timepoints independently. This discards
-the temporal structure of differentiation. A sample
-that is transcriptionally "ahead" or "behind" will
-appear differentially expressed at every timepoint,
-but the underlying cause is a timing shift, not a
-condition-specific program.
-
-This method reduces the full transcriptomic trajectory
-to a single scalar **maturation score** per sample,
-enabling:
-
-- Direct quantification of differentiation timing
-  differences between conditions
-- Detection of whether an experimental condition
-  accelerates or delays differentiation
-- Comparison across experiments that share a common
-  reference time course
 
 ## Workflow
 
@@ -58,72 +35,6 @@ enabling:
 fig-align="center"}
 
 ## Mathematical Framework
-
-### Dimensionality Reduction via PCA
-
-Given a VST-normalized expression matrix
-$X \in \mathbb{R}^{p \times n}$ ($p$ genes, $n$
-samples), center each gene across samples:
-
-$$
-x_{ij}^{c} = x_{ij}
-  - \frac{1}{n}\sum_{k=1}^{n} x_{ik}
-$$
-
-Compute the sample covariance matrix and its
-eigendecomposition:
-
-$$
-C = \frac{1}{n-1}
-  \left(X^{c}\right)^{\!\top} X^{c}
-\in \mathbb{R}^{n \times n},
-\qquad
-C\,\mathbf{v}_k = \lambda_k\,\mathbf{v}_k,
-\qquad
-\lambda_1 \geq \lambda_2 \geq \cdots
-$$
-
-The $k$-th principal component score for sample $i$
-is the projection onto the $k$-th eigenvector:
-
-$$
-z_{ik} = \sum_{j=1}^{p} v_{kj}\, x_{ij}^{c}
-$$
-
-Each sample is represented by its first three PC
-coordinates, which together capture the majority
-of transcriptomic variance:
-
-$$
-\mathbf{z}_i = (z_{i1},\; z_{i2},\; z_{i3})
-  \in \mathbb{R}^3
-$$
-
-Variance explained by each component:
-
-$$
-\textrm{VE}_k = \frac{\lambda_k}
-  {\displaystyle\sum_{j=1}^{n}\lambda_j}
-$$
-
-### Centroid Vector
-
-For a set of $n_t$ reference samples at timepoint
-$t$, the centroid in PC space is:
-
-$$
-\bar{\mathbf{z}}_t
-= \frac{1}{n_t}\sum_{i \in t}\mathbf{z}_i
-$$
-
-The reference differentiation vector connects the
-earliest and latest control centroids:
-
-$$
-\vec{v}
-= \bar{\mathbf{z}}_{t_{\textrm{late}}}
-  - \bar{\mathbf{z}}_{t_{\textrm{early}}}
-$$
 
 ### Maturation Score
 
