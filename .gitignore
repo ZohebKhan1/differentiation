@@ -3,3 +3,12 @@
 *_cache/
 /index_files/
 /tutorial_workflow_files/
+
+# Local analysis outputs not used by the published tutorial
+/plots/
+/results/
+/maturation_scores.csv
+/pca_trajectory_plot.png
+/docs/tutorial_workflow.html
+/docs/tutorial_workflow_files/
+/lrt/s2a-tpm-lineplots-LS1.R

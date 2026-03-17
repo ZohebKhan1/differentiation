@@ -1,26 +1,5 @@
 [
   {
-    "objectID": "tutorial_workflow.html",
-    "href": "tutorial_workflow.html",
-    "title": "Maturation Score Workflow",
-    "section": "",
-    "text": "Calculating a PCA-based Maturation Score to quantify differentiation progress. Basically projecting samples onto a vector defined by the D21 control timecourse (Day 6 -&gt; Day 17)."
-  },
-  {
-    "objectID": "tutorial_workflow.html#a.-3d-pca",
-    "href": "tutorial_workflow.html#a.-3d-pca",
-    "title": "Maturation Score Workflow",
-    "section": "A. 3D PCA",
-    "text": "A. 3D PCA\nplotting the control trajectory\n\n\nCode\n# Var explained\nvar_exp &lt;- summary(pca_res)$importance[2, 1:3] * 100\npc1_lab &lt;- paste0(\"PC1: \", round(var_exp[1], 1), \"%\")\npc2_lab &lt;- paste0(\"PC2: \", round(var_exp[2], 1), \"%\")\npc3_lab &lt;- paste0(\"PC3: \", round(var_exp[3], 1), \"%\")\n\n# Filter for control only\npca_coords_ctrl &lt;- pca_coords %&gt;% filter(!!sym(group_col) == control_group)\n\n# Colors (no black for Day 6)\ncols &lt;- c(\"#1B9E77\", \"#D95F02\", \"#7570B3\")\ncols_mapped &lt;- cols[as.numeric(pca_coords_ctrl[[time_col]])]\n\n# define plotting function to avoid duplication\nplot_pca_3d &lt;- function() {\n  # Scatterplot3d with manual margin adjustments\n  s3d &lt;- scatterplot3d(x = pca_coords_ctrl$PC1, \n                       y = pca_coords_ctrl$PC2, \n                       z = pca_coords_ctrl$PC3,\n                       color = cols_mapped,\n                       pch = 19, \n                       type = \"h\", \n                       main = paste(\"3D PCA (\", control_group, \")\"),\n                       xlab = pc1_lab,\n                       ylab = pc2_lab,\n                       zlab = pc3_lab,\n                       angle = 45,\n                       scale.y = 0.7,\n                       y.margin.add = 0.2,\n                       mar = c(5, 5, 4, 7))\n  \n  # Arrow\n  s3d_coords &lt;- s3d$xyz.convert(x = c(origin_vec[1], endpoint_vec[1]), \n                                y = c(origin_vec[2], endpoint_vec[2]), \n                                z = c(origin_vec[3], endpoint_vec[3]))\n  \n  arrows(x0 = s3d_coords$x[1], y0 = s3d_coords$y[1], \n         x1 = s3d_coords$x[2], y1 = s3d_coords$y[2], \n         lwd = 3, col = \"black\", length = 0.1)\n  \n  text(s3d_coords$x[1], s3d_coords$y[1], labels = \"Start\", pos = 1, cex = 1.2)\n  text(s3d_coords$x[2], s3d_coords$y[2], labels = \"End\", pos = 3, cex = 1.2)\n  \n  # Legend outside\n  par(xpd = TRUE)\n  legend(\"topright\", inset = c(-0.15, 0), legend = levels(pca_coords_ctrl[[time_col]]),\n         col = cols, pch = 19, title = \"Timepoint\", bty = \"n\", cex = 1.0)\n}\n\n# Save plot (Smaller dimensions)\npng(\"plots/pca_trajectory_plot.png\", width = 6, height = 5, units = \"in\", res = 300)\nplot_pca_3d()\ndev.off()\n\n\nunigd \n    2 \n\n\nCode\n# show plot in rmd\nplot_pca_3d()"
-  },
-  {
-    "objectID": "tutorial_workflow.html#b.-scores",
-    "href": "tutorial_workflow.html#b.-scores",
-    "title": "Maturation Score Workflow",
-    "section": "B. Scores",
-    "text": "B. Scores\nBarplot and Lineplot.\n\n\nCode\n# summary stats\nscore_sum &lt;- pca_coords %&gt;%\n  group_by(!!sym(group_col), !!sym(time_col)) %&gt;%\n  summarise(\n    mean = mean(maturation_score),\n    se = sd(maturation_score) / sqrt(n()),\n    .groups = \"drop\"\n  )\n\n# 1. Bbarplot\np_bar &lt;- ggplot(score_sum, aes(x = !!sym(time_col), y = mean, fill = !!sym(group_col))) +\n  geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.8) +\n  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), \n                position = position_dodge(width = 0.8), width = 0.2) +\n  geom_point(data = pca_coords, \n             aes(x = !!sym(time_col), y = maturation_score, group = !!sym(group_col)),\n             position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), \n             color = \"black\", size = 1.5, alpha = 0.6, show.legend = FALSE) +\n  theme_bw() +\n  labs(y = \"Norm Score\", title = \"Maturation Score\", fill = \"Genotype\")\n\n# 2. lineplot\np_line &lt;- ggplot(score_sum, aes(x = !!sym(time_col), y = mean, group = !!sym(group_col), color = !!sym(group_col))) +\n  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.1, size = 0.5) +\n  geom_line(size = 1) +\n  geom_point(size = 3) +\n  theme_bw() +\n  labs(y = \"Norm Score\", title = \"Trajectory\", color = \"Genotype\")\n\ngrid.arrange(p_bar, p_line, ncol = 2)"
-  },
-  {
     "objectID": "index.html",
     "href": "index.html",
     "title": "Differentiation Progression Analysis",
